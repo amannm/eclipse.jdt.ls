@@ -1,75 +1,95 @@
-# Codebase Extraction Plan
+# Extraction Plan for Minimal JDT Language Server
 
-This document outlines a plan to refactor the repository into a minimal Java 21
-library that contains only the core functionality required to run the language
-server. The goal is to drop all OSGi/Eclipse platform dependencies and keep only
-the essential pieces such as LSP4J and the minimal JDT libraries needed for
-refactoring operations.
+This document outlines a strategy for reducing the `eclipse.jdt.ls`
+repository to a lightweight Java 21 library that exposes only the core
+Language Server Protocol (LSP) functionality. The aim is to remove OSGi
+and Eclipse platform dependencies while keeping the parts of the Eclipse
+JDT that are required for code completion and refactoring.
 
-## Goals
+## 1. Identify Essential Modules
 
-- Produce a plain Java 21 library that implements the Language Server Protocol
-  (LSP) for Java.
-- Eliminate OSGi/Tycho specific build artifacts and Eclipse platform plug-ins.
-- Retain only the pieces of the current code base that directly implement the
-  LSP server logic and rely on the minimal JDT core libraries.
+The repository currently contains several Maven modules:
 
-## Proposed Steps
+- `org.eclipse.jdt.ls.target` – target platform definition (p2)
+- `org.eclipse.jdt.ls.core` – language server implementation
+- `org.eclipse.jdt.ls.filesystem` – custom file system integration
+- `org.eclipse.jdt.ls.logback.appender` – logback appender
+- `org.eclipse.jdt.ls.product` – Eclipse product packaging
+- `org.eclipse.jdt.ls.tests` – unit/integration tests
+- `org.eclipse.jdt.ls.tests.syntaxserver` – tests for syntax server
+- `org.eclipse.jdt.ls.repository` – p2 update site
 
-1. **Identify core packages**
-   - Inspect `org.eclipse.jdt.ls.core` and locate packages that implement the
-     LSP server (handlers, preferences, diagnostics, etc.).
-   - Mark unrelated plug-in specific packages (e.g., OSGi activators,
-     product definitions, p2 repository code) for removal.
+For a minimal standalone library we should keep only:
 
-2. **Remove Tycho/OSGi build**
-   - Replace `eclipse-plugin` packaging with a simple `jar` packaging in the
-     Maven modules that will remain.
-   - Delete modules such as `org.eclipse.jdt.ls.product`,
-     `org.eclipse.jdt.ls.repository`, and `org.eclipse.jdt.ls.target` that are
-     used only for Eclipse product builds.
+1. The language server logic from `org.eclipse.jdt.ls.core`
+2. Any required file system helpers from `org.eclipse.jdt.ls.filesystem`
+3. Logging support (either keep the appender module or switch to a
+   simpler logging setup)
 
-3. **Create a new Maven module**
-   - Introduce a plain Java module (e.g., `jdt.ls.minimal`) that depends on
-     `org.eclipse.lsp4j` and the minimal set of JDT libraries (typically
-     `org.eclipse.jdt.core`).
-   - Move the selected source packages from `org.eclipse.jdt.ls.core` into this
-     module and adapt package names as desired.
+All product packaging, p2 repository modules, and OSGi configuration can
+be removed.
 
-4. **Adjust dependencies**
-   - Keep `org.eclipse.lsp4j` and remove any dependency that pulls in Eclipse
-     platform or OSGi bundles.
-   - Include `org.eclipse.jdt.core` and other JDT libraries strictly required to
-     compile and perform refactoring actions.
-   - Drop integrations with M2Eclipse, Buildship, and other tooling.
+## 2. Convert to Standard JAR Packaging
 
-5. **Rewrite entry point**
-   - Provide a small `main` class that launches the server using LSP4J’s
-     `Launcher` API.
-   - Remove the existing OSGi `Activator` and associated plug-in metadata.
+- Change the packaging of remaining modules from `eclipse-plugin` to
+  `jar` in their `pom.xml` files.
+- Delete `plugin.xml`, `build.properties` and other OSGi descriptors.
+- Replace Tycho plugins with `maven-compiler-plugin` and
+  `maven-jar-plugin` configured for Java 21.
+- Ensure dependencies such as `lsp4j` and `org.eclipse.jdt.core` are
+  pulled from Maven Central.
 
-6. **Simplify configuration**
-   - Remove launch configuration files under `launch/` and replace them with a
-     simple command that runs the jar: `java -jar jdtls-minimal.jar`.
+## 3. Remove OSGi and Eclipse Runtime Code
 
-7. **Prune test suite**
-   - Retain only tests that exercise core language server operations using JUnit.
-   - Remove tests dependent on OSGi, the Eclipse IDE, or complex workspace setups.
+- Eliminate any uses of `org.osgi.*` classes, service trackers or
+  extension points.
+- Refactor initialization logic so the server can be created via a
+  regular Java `main` method or factory, without an Equinox launcher.
+- Drop the target platform and product modules since they only serve
+  Eclipse packaging.
 
-8. **Update build instructions**
-   - Document how to build the new module using Java 21 with standard Maven:
-     `JAVA_HOME=/path/to/jdk21 mvn package`.
-   - Provide instructions for integration into other code bases as a plain jar.
+## 4. Minimal Dependency Set
 
-9. **Iterate and validate**
-   - After the initial extraction, compile the minimal module and run basic LSP
-     scenarios (e.g., open file, completion, refactor) to verify functionality.
-   - Continue removing residual dependencies until only LSP4J and the required
-     JDT libraries remain.
+After cleanup, the library should depend only on:
 
-## Result
+- **lsp4j** – for the Language Server Protocol APIs
+- **org.eclipse.jdt.core** – compiler and tooling APIs needed for code
+  completion and refactoring
+- **slf4j/logback** – for logging (optional)
 
-Following this plan will yield a lightweight Java 21 library that exposes the
-core LSP server for Java without any OSGi or Eclipse platform overhead. This
-stripped-down version can then be copied into another repository and built as a
-standard Java dependency.
+Other dependencies related to the Eclipse IDE, Buildship, M2E or the
+OSGi framework can be deleted.
+
+## 5. Restructure Source Layout
+
+- Move Java sources into the Maven standard layout
+  `src/main/java` (and `src/test/java` for tests).
+- Adjust package names if needed to remove references to internal Eclipse
+  packages.
+- Convert existing tests to JUnit 5 where possible and drop those that
+  require the OSGi runtime.
+
+## 6. Provide a Simple Build and Usage Example
+
+- Create a trimmed parent `pom.xml` that only includes the kept modules
+  and sets the compiler level to Java 21.
+- Document a basic example that creates and starts the server using
+  lsp4j, suitable for embedding in other projects.
+- Describe how to publish the resulting JAR to a repository for use as a
+  dependency elsewhere.
+
+## 7. Recommended Extraction Steps
+
+1. **Isolate** the core packages from `org.eclipse.jdt.ls.core` by
+   removing OSGi-specific code and verifying they compile independently.
+2. **Refactor** service initialization and dependency management to use
+   plain Java constructs instead of OSGi services.
+3. **Build** the modules with standard Maven to ensure they work as
+   regular JARs and start the server from a small `main` method.
+4. **Remove** the obsolete modules and clean up the parent POM.
+5. **Validate** LSP features (completion, diagnostics, refactoring) using
+   the remaining JUnit tests.
+
+Following this plan will result in a minimal Java 21 library that offers
+language server functionality using only lsp4j and the essential pieces
+of the Eclipse JDT core.
