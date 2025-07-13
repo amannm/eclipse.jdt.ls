@@ -16,13 +16,15 @@ import org.eclipse.lsp4j.services.WorkspaceService;
  */
 public class SimpleLanguageServer implements LanguageServer, LanguageClientAware {
 
-    private final TextDocumentService textService = new SimpleTextDocumentService();
+    private final SimpleTextDocumentService textService = new SimpleTextDocumentService();
     private final WorkspaceService workspaceService = new SimpleWorkspaceService();
     private LanguageClient client;
 
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
-        InitializeResult result = new InitializeResult(new ServerCapabilities());
+        ServerCapabilities caps = new ServerCapabilities();
+        caps.setTextDocumentSync(org.eclipse.lsp4j.TextDocumentSyncKind.Full);
+        InitializeResult result = new InitializeResult(caps);
         return CompletableFuture.completedFuture(result);
     }
 
@@ -49,5 +51,6 @@ public class SimpleLanguageServer implements LanguageServer, LanguageClientAware
     @Override
     public void connect(LanguageClient client) {
         this.client = client;
+        textService.connect(client);
     }
 }
