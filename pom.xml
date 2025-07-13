@@ -33,15 +33,14 @@
 		<cbi.jarsigner.skip>true</cbi.jarsigner.skip>
 		<generateSourceRef>true</generateSourceRef>
 	</properties>
-	<modules>
-		<module>org.eclipse.jdt.ls.target</module>
-		<module>org.eclipse.jdt.ls.core</module>
-		<module>org.eclipse.jdt.ls.filesystem</module>
-		<module>org.eclipse.jdt.ls.tests</module>
-		<module>org.eclipse.jdt.ls.logback.appender</module>
-		<module>org.eclipse.jdt.ls.tests.syntaxserver</module>
-		<module>org.eclipse.jdt.ls.product</module>
-	</modules>
+        <modules>
+                <!-- Only keep the modules required for a minimal standalone build -->
+                <module>org.eclipse.jdt.ls.core</module>
+                <module>org.eclipse.jdt.ls.filesystem</module>
+                <module>org.eclipse.jdt.ls.logback.appender</module>
+                <!-- New experimental minimal server module -->
+                <module>minimal-jdt-ls</module>
+        </modules>
 	<build>
 		<pluginManagement>
 			<plugins>
