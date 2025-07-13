@@ -16,6 +16,12 @@ import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.Hover;
+import org.eclipse.lsp4j.HoverParams;
+import org.eclipse.lsp4j.MarkupContent;
+import org.eclipse.lsp4j.DefinitionParams;
+import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.LocationLink;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
@@ -31,6 +37,9 @@ import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
+import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.SimpleName;
+import org.eclipse.jdt.core.dom.NodeFinder;
 
 /**
  * Minimal text document service providing empty implementations.
@@ -116,6 +125,111 @@ public class SimpleTextDocumentService implements TextDocumentService, LanguageC
     }
 
     @Override
+    public CompletableFuture<Hover> hover(HoverParams params) {
+        String text = documents.get(params.getTextDocument().getUri());
+        if (text == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        int offset = offsetAt(text, params.getPosition());
+        ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
+        parser.setSource(text.toCharArray());
+        parser.setKind(ASTParser.K_COMPILATION_UNIT);
+        CompilationUnit cu = (CompilationUnit) parser.createAST(null);
+        ASTNode node = NodeFinder.perform(cu, offset, 0);
+        String msg = null;
+        if (node instanceof MethodDeclaration) {
+            msg = "method " + ((MethodDeclaration) node).getName().getIdentifier();
+        } else if (node instanceof TypeDeclaration) {
+            msg = "class " + ((TypeDeclaration) node).getName().getIdentifier();
+        } else if (node instanceof VariableDeclarationFragment) {
+            msg = "variable " + ((VariableDeclarationFragment) node).getName().getIdentifier();
+        } else if (node instanceof SimpleName) {
+            ASTNode parent = node.getParent();
+            if (parent instanceof MethodDeclaration && ((MethodDeclaration) parent).getName().equals(node)) {
+                msg = "method " + ((MethodDeclaration) parent).getName().getIdentifier();
+            } else if (parent instanceof TypeDeclaration && ((TypeDeclaration) parent).getName().equals(node)) {
+                msg = "class " + ((TypeDeclaration) parent).getName().getIdentifier();
+            } else if (parent instanceof VariableDeclarationFragment && ((VariableDeclarationFragment) parent).getName().equals(node)) {
+                msg = "variable " + ((VariableDeclarationFragment) parent).getName().getIdentifier();
+            }
+        }
+        if (msg == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        Hover hover = new Hover(new MarkupContent("plaintext", msg));
+        return CompletableFuture.completedFuture(hover);
+    }
+
+    @Override
+    public CompletableFuture<org.eclipse.lsp4j.jsonrpc.messages.Either<List<? extends Location>, List<? extends LocationLink>>> definition(DefinitionParams params) {
+        String text = documents.get(params.getTextDocument().getUri());
+        if (text == null) {
+            return CompletableFuture.completedFuture(org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(Collections.emptyList()));
+        }
+
+        int offset = offsetAt(text, params.getPosition());
+        ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
+        parser.setSource(text.toCharArray());
+        parser.setKind(ASTParser.K_COMPILATION_UNIT);
+        CompilationUnit cu = (CompilationUnit) parser.createAST(null);
+        ASTNode node = NodeFinder.perform(cu, offset, 0);
+        String name = null;
+        if (node instanceof SimpleName) {
+            name = ((SimpleName) node).getIdentifier();
+        } else if (node instanceof MethodDeclaration) {
+            name = ((MethodDeclaration) node).getName().getIdentifier();
+        } else if (node instanceof TypeDeclaration) {
+            name = ((TypeDeclaration) node).getName().getIdentifier();
+        } else if (node instanceof VariableDeclarationFragment) {
+            name = ((VariableDeclarationFragment) node).getName().getIdentifier();
+        }
+
+        final ASTNode[] result = new ASTNode[1];
+        if (name != null) {
+            final String searchName = name;
+            cu.accept(new ASTVisitor() {
+                @Override
+                public boolean visit(MethodDeclaration n) {
+                    if (n.getName().getIdentifier().equals(searchName)) {
+                        result[0] = n.getName();
+                        return false;
+                    }
+                    return true;
+                }
+                @Override
+                public boolean visit(TypeDeclaration n) {
+                    if (n.getName().getIdentifier().equals(searchName)) {
+                        result[0] = n.getName();
+                        return false;
+                    }
+                    return true;
+                }
+                @Override
+                public boolean visit(VariableDeclarationFragment n) {
+                    if (n.getName().getIdentifier().equals(searchName)) {
+                        result[0] = n.getName();
+                        return false;
+                    }
+                    return true;
+                }
+            });
+        }
+
+        if (result[0] == null) {
+            return CompletableFuture.completedFuture(org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(Collections.emptyList()));
+        }
+        int start = result[0].getStartPosition();
+        int length = result[0].getLength();
+        int startLine = cu.getLineNumber(start) - 1;
+        int startCol = cu.getColumnNumber(start) - 1;
+        int endLine = cu.getLineNumber(start + length) - 1;
+        int endCol = cu.getColumnNumber(start + length) - 1;
+        Range range = new Range(new Position(startLine, startCol), new Position(endLine, endCol));
+        Location loc = new Location(params.getTextDocument().getUri(), range);
+        return CompletableFuture.completedFuture(org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(Collections.singletonList(loc)));
+    }
+
+    @Override
     public void connect(LanguageClient client) {
         this.client = client;
     }
@@ -148,5 +262,18 @@ public class SimpleTextDocumentService implements TextDocumentService, LanguageC
         }
 
         client.publishDiagnostics(new PublishDiagnosticsParams(uri, diagnostics));
+    }
+
+    private int offsetAt(String text, Position pos) {
+        int offset = 0;
+        int line = pos.getLine();
+        for (int i = 0; i < line; i++) {
+            int nl = text.indexOf('\n', offset);
+            if (nl == -1) {
+                return text.length();
+            }
+            offset = nl + 1;
+        }
+        return Math.min(offset + pos.getCharacter(), text.length());
     }
 }
